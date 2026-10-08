@@ -55,6 +55,7 @@ MINI_LETTA_PROVIDER=openai OPENAI_BASE_URL=http://localhost:11434/v1 MINI_LETTA_
 | `MINI_LETTA_HOME` | storage root (default `~/.mini-letta`) |
 | `MINI_LETTA_PROVIDER` | `mock` (default) or `openai` |
 | `MINI_LETTA_CONTEXT_WINDOW` | context window in tokens |
+| `MINI_LETTA_REFLECTION_CONTEXT_WINDOW` | the reflection subagent's own window (defaults to the one above) |
 | `MINI_LETTA_REMOTE_ROOT` | directory of bare repos acting as the memory server |
 | `MINI_LETTA_FS_SANDBOX` | unset: reflection confined · `1`: shells too · `0`: nothing |
 | `MINI_LETTA_CONSTRAINTS_UPDATE=1` | allow a commit that changes `.memfs.config.json` |

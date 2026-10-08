@@ -73,7 +73,12 @@ async function chatOnce(text: string): Promise<{ reflection: Promise<void> }> {
   await runTurn({ agent, provider, store, tools: TOOLS, userText: text, home, onEvent: printEvent });
   process.stdout.write("\n");
   return {
-    reflection: maybeReflectAfterTurn({ home, agent, conversationId: store.conversationId, provider }).then(
+    reflection: maybeReflectAfterTurn({
+      home,
+      agent,
+      conversationId: store.conversationId,
+      provider: createProvider(process.env, { role: "reflection" }),
+    }).then(
       printReflection,
     ),
   };
@@ -123,7 +128,7 @@ async function main(): Promise<void> {
         home,
         agent,
         conversationId: values.conversation,
-        provider: createProvider(),
+        provider: createProvider(process.env, { role: "reflection" }),
         instruction: values.instruction,
         onEvent: (e) => (e.type === "tool_call" ? printEvent(e) : undefined),
       }),
