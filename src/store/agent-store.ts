@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { newId } from "@/llm/types";
 import { agentAuthor, getMemoryDir, initialMemoryFiles, initMemoryRepo } from "@/memory/memfs";
+import { attachRemote, cloneMemory, remoteHasMemory, remoteUrlFor } from "@/sync/remote";
 import { agentDir, getHome } from "./paths";
 
 /** A labelled piece of starter memory; becomes a root core file in MemFS. */
@@ -80,12 +81,25 @@ export function createAgent(
     createdAt: new Date().toISOString(),
   };
   saveAgent(agent, home);
-  initMemoryRepo({
-    memoryDir: getMemoryDir(agent.id, home),
-    author: agentAuthor(agent.id, agent.name),
-    files: initialMemoryFiles(input.blocks ?? DEFAULT_BLOCKS),
-  });
+  ensureMemoryCheckout(agent, home, input.blocks ?? DEFAULT_BLOCKS);
   return agent;
+}
+
+/**
+ * Materialize the agent's memory on this machine: clone it when another
+ * machine already published it, otherwise create it (and publish it when a
+ * remote is configured). letta-code: ensureLocalMemfsCheckout / applyMemfsFlags.
+ */
+export function ensureMemoryCheckout(agent: AgentRecord, home = getHome(), blocks = DEFAULT_BLOCKS): void {
+  const memoryDir = getMemoryDir(agent.id, home);
+  if (existsSync(join(memoryDir, ".git"))) return;
+  const url = remoteUrlFor(agent.id);
+  if (remoteHasMemory(url)) {
+    cloneMemory(url, memoryDir);
+    return;
+  }
+  initMemoryRepo({ memoryDir, author: agentAuthor(agent.id, agent.name), files: initialMemoryFiles(blocks) });
+  if (url) attachRemote(memoryDir, url);
 }
 
 export function saveAgent(agent: AgentRecord, home = getHome()): void {
@@ -109,7 +123,8 @@ export function listAgents(home = getHome()): AgentRecord[] {
 
 /** Load the agent, creating it with defaults on first use. */
 export function loadOrCreateAgent(agentId: string, home = getHome()): AgentRecord {
-  return existsSync(agentFile(agentId, home))
-    ? loadAgent(agentId, home)
-    : createAgent({ id: agentId }, home);
+  if (!existsSync(agentFile(agentId, home))) return createAgent({ id: agentId }, home);
+  const agent = loadAgent(agentId, home);
+  ensureMemoryCheckout(agent, home);
+  return agent;
 }

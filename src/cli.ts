@@ -13,6 +13,7 @@ import { getHome } from "@/store/paths";
 import { compactConversation } from "@/context/compact-conversation";
 import { searchRecall } from "@/recall/search";
 import { launchReflection, type ReflectionOutcome } from "@/reflection/launcher";
+import { startPalace } from "@/palace/server";
 import { maybeReflectAfterTurn } from "@/reflection/post-turn";
 import { FILE_TOOLS } from "@/tools/file-tools";
 import { recallSearchTool } from "@/tools/recall-tool";
@@ -29,6 +30,8 @@ const { positionals, values } = parseArgs({
     trigger: { type: "string" },
     steps: { type: "string" },
     instruction: { type: "string" },
+    port: { type: "string", default: "8787" },
+    host: { type: "string", default: "127.0.0.1" },
   },
 });
 
@@ -107,6 +110,11 @@ async function main(): Promise<void> {
       console.log(`${hit.score.toFixed(2)}\t${hit.conversationId}\t${hit.role}\t${hit.text.replace(/\s+/g, " ").slice(0, 100)}`);
     }
     return;
+  }
+  if (command === "palace") {
+    const server = startPalace({ home, port: Number(values.port), hostname: values.host });
+    console.log(`Memory Palace on http://${server.hostname}:${server.port}/ (home: ${home})`);
+    await new Promise(() => {});
   }
   if (command === "reflect") {
     const agent = loadOrCreateAgent(values.agent, home);

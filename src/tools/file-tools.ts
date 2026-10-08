@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
-import { stringArg, type Tool } from "./types";
+import { dirname, isAbsolute, join } from "node:path";
+import { assertNotOtherAgentsMemory, wrapCommand } from "@/sandbox/policy";
+import { stringArg, type Tool, type ToolContext } from "./types";
 
 const MAX_OUTPUT = 4_000;
 
@@ -9,9 +10,10 @@ function truncate(text: string): string {
   return text.length <= MAX_OUTPUT ? text : `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} chars]`;
 }
 
-function absolutePath(path: string): string {
+function absolutePath(path: string, ctx: ToolContext): string {
   // Like letta-code's file tools: paths are literal, `$MEMORY_DIR` is NOT expanded.
   if (!isAbsolute(path)) throw new Error(`Path must be absolute: ${path}`);
+  assertNotOtherAgentsMemory(path, join(ctx.home, "agents"), ctx.agent.id);
   return path;
 }
 
@@ -27,7 +29,8 @@ export const bashTool: Tool = {
     },
   },
   async run(args, ctx) {
-    const result = spawnSync("bash", ["-c", stringArg(args, "command")], {
+    const [binary, argv] = wrapCommand(ctx.sandbox, stringArg(args, "command"));
+    const result = spawnSync(binary, argv, {
       encoding: "utf8",
       env: { ...process.env, ...ctx.env },
       timeout: 30_000,
@@ -50,8 +53,8 @@ export const readFileTool: Tool = {
       required: ["path"],
     },
   },
-  async run(args) {
-    return truncate(readFileSync(absolutePath(stringArg(args, "path")), "utf8"));
+  async run(args, ctx) {
+    return truncate(readFileSync(absolutePath(stringArg(args, "path"), ctx), "utf8"));
   },
 };
 
@@ -65,8 +68,8 @@ export const writeFileTool: Tool = {
       required: ["path", "content"],
     },
   },
-  async run(args) {
-    const path = absolutePath(stringArg(args, "path"));
+  async run(args, ctx) {
+    const path = absolutePath(stringArg(args, "path"), ctx);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, stringArg(args, "content"));
     return `Wrote ${path}`;
@@ -87,8 +90,8 @@ export const editFileTool: Tool = {
       required: ["path", "old_text", "new_text"],
     },
   },
-  async run(args) {
-    const path = absolutePath(stringArg(args, "path"));
+  async run(args, ctx) {
+    const path = absolutePath(stringArg(args, "path"), ctx);
     const before = readFileSync(path, "utf8");
     const oldText = stringArg(args, "old_text");
     const count = before.split(oldText).length - 1;

@@ -1,0 +1,31 @@
+# docker compose up -d                      → seed demo memory, serve the Palace on :8787
+# docker compose --profile test run --rm e2e → end-to-end story against the running Palace
+services:
+  seed:
+    build: .
+    command: ["bun", "scripts/demo.ts"]
+    volumes: [data:/data, remote:/remote]
+    environment: { MINI_LETTA_REMOTE_ROOT: /remote }
+  palace:
+    build: .
+    depends_on:
+      seed: { condition: service_completed_successfully }
+    ports: ["8787:8787"]
+    volumes: [data:/data, remote:/remote]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r => process.exit(r.ok ? 0 : 1))"]
+      interval: 3s
+      retries: 10
+  e2e:
+    build: .
+    profiles: [test]
+    command: ["bun", "scripts/e2e.ts"]
+    depends_on:
+      palace: { condition: service_healthy }
+    volumes: [data:/data, remote:/remote]
+    environment:
+      MINI_LETTA_REMOTE_ROOT: /remote
+      PALACE_URL: http://palace:8787
+volumes:
+  data: {}
+  remote: {}

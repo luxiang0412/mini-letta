@@ -3,6 +3,9 @@ import type { CompactionStats } from "@/context/compaction";
 import { shouldCompact } from "@/context/compaction";
 import { estimateRequestTokens } from "@/context/tokens";
 import { getMemoryDir } from "@/memory/memfs";
+import { isShellSandboxEnabled, type SandboxPolicy } from "@/sandbox/policy";
+import { pullMemory, syncAfterTurn } from "@/sync/remote";
+import { crossAgentProfile } from "./sandbox-profiles";
 import {
   type CompletionResult,
   ContextOverflowError,
@@ -18,6 +21,7 @@ import {
   drainReminders,
   enqueueReminder,
   formatAgentInfo,
+  formatSyncReminder,
   wrapReminder,
 } from "./reminders";
 import { resolveSystemPrompt } from "./system-prompt";
@@ -40,6 +44,8 @@ export interface TurnInput {
   memoryDir?: string;
   /** Extra shell environment (a subagent's TRANSCRIPT_PATH, PARENT_AGENT_ID, ...). */
   extraEnv?: Record<string, string>;
+  /** Shell confinement; defaults to the cross-agent profile when MINI_LETTA_FS_SANDBOX=1. */
+  sandbox?: SandboxPolicy;
   maxSteps?: number;
   onEvent?: (event: TurnEvent) => void;
 }
@@ -66,7 +72,13 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     conversationId: store.conversationId,
     memoryDir,
     env: { ...memoryEnv(agent, memoryDir), ...input.extraEnv },
+    sandbox: input.sandbox ?? (isShellSandboxEnabled() ? crossAgentProfile(input.home, agent.id) : undefined),
   };
+
+  // Take what other machines pushed before compiling anything (letta pulls on startup).
+  const pulled = pullMemory(memoryDir);
+  const pullProblem = formatSyncReminder(pulled, memoryDir);
+  if (pullProblem) enqueueReminder(store, pullProblem);
 
   // Reminders ride along with the user's message, before what they typed.
   const reminders = drainReminders(store);
@@ -135,6 +147,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
 
   const dirty = checkMemoryAfterTurn(memoryDir);
   if (dirty) enqueueReminder(store, dirty);
+  const synced = syncAfterTurn(memoryDir);
+  const syncProblem = formatSyncReminder(synced, memoryDir);
+  if (syncProblem) enqueueReminder(store, syncProblem);
   return result ?? { steps: maxSteps, finalText: "(stopped: max steps reached)", systemPrompt };
 }
 

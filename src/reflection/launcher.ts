@@ -6,6 +6,9 @@ import { getMemoryDir } from "@/memory/memfs";
 import type { AgentRecord } from "@/store/agent-store";
 import { ConversationStore } from "@/store/conversation-store";
 import { agentDir } from "@/store/paths";
+import { reflectionProfile } from "@/agent/sandbox-profiles";
+import { isFsSandboxEnabled } from "@/sandbox/policy";
+import { syncAfterTurn } from "@/sync/remote";
 import { bashTool, editFileTool } from "@/tools/file-tools";
 import { tryAcquireLock } from "@/utils/file-lock";
 import { buildReflectionTaskPrompt, REFLECTION_SYSTEM_PROMPT } from "./prompt";
@@ -74,6 +77,10 @@ export async function launchReflection(input: {
         home,
         memoryDir: worktree.worktreeDir,
         extraEnv: { TRANSCRIPT_PATH: payload.payloadPath, PARENT_AGENT_ID: agent.id },
+        // Unattended memory writers are confined by default (letta: memory-subagent profile).
+        sandbox: isFsSandboxEnabled()
+          ? reflectionProfile({ home, parentAgentId: agent.id, worktreeDir: worktree.worktreeDir, payloadPath: payload.payloadPath })
+          : undefined,
         maxSteps: 12,
         onEvent,
       });
@@ -88,6 +95,7 @@ export async function launchReflection(input: {
 
     const finalized = await finalizeMemoryWorktree(worktree, { subagentSucceeded: succeeded });
     if (consumesTranscript(finalized)) markReflected(store, payload.endMessageId);
+    if (finalized.status === "merged") syncAfterTurn(parentMemoryDir);
     return { launched: true, status: finalized.status, summary: finalized.summary, report, reflectionId: worktree.id };
   } finally {
     release();

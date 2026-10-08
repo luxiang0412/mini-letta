@@ -1,4 +1,5 @@
 import type { CompiledSystemPrompt } from "@/memory/compile";
+import type { SyncResult } from "@/sync/remote";
 import { git } from "@/memory/git";
 import type { AgentRecord } from "@/store/agent-store";
 import type { ConversationStore } from "@/store/conversation-store";
@@ -64,6 +65,32 @@ export function checkMemoryAfterTurn(memoryDir: string): string | null {
     "",
     "Commit these memory changes when appropriate, staging only the files you changed. Uncommitted memory does not reach your future prompts.",
   ].join("\n");
+}
+
+/** letta-code's formatMemoryPostTurnSyncReminder, for the states sync cannot fix itself. */
+export function formatSyncReminder(result: SyncResult, memoryDir: string): string | null {
+  if (result.status === "conflict") {
+    return [
+      "MEMORY GIT CONFLICT: Your memory could not be synchronized with the copy on other machines.",
+      "",
+      `Memory directory: ${memoryDir}`,
+      `Status: ${result.summary}`,
+      "",
+      "The harness aborted the rebase, so your commits are intact but diverged. When memory is the task, run",
+      '`cd "$MEMORY_DIR" && git pull --rebase origin main`, resolve each conflict by reading both sides and keeping the',
+      "intended memory (never discard a side wholesale), `git add` the files, then `GIT_EDITOR=true git rebase --continue`.",
+    ].join("\n");
+  }
+  if (result.status === "push_failed") {
+    return [
+      "MEMORY SYNC RETRY: The harness could not push memory commits and will retry after a later turn.",
+      "",
+      `Status: ${result.summary}`,
+      "",
+      "Continue the current task. Do not push memory yourself.",
+    ].join("\n");
+  }
+  return null;
 }
 
 const PENDING = "pending-reminders.json";

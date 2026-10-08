@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { git, gitOrThrow } from "@/memory/git";
+import { refreshFromOrigin } from "@/sync/remote";
 import { withLock } from "@/utils/file-lock";
 
 /**
@@ -92,6 +93,11 @@ export async function finalizeMemoryWorktree(
     if (commitCount === 0) return done("no_changes", "Reflection made no memory commits.");
     if (porcelain(worktree.parentMemoryDir)) {
       return done("parent_dirty", "Parent memory has uncommitted changes; reflection will be retried.");
+    }
+    try {
+      refreshFromOrigin(worktree.parentMemoryDir);
+    } catch {
+      return done("failed", "Parent memory could not be refreshed from the remote; reflection will be retried.");
     }
     const subject = git(worktree.parentMemoryDir, ["log", "-1", "--format=%s", worktree.branchName]).stdout.trim();
     const summary = subject.replace(/^[a-z]+(?:\([^)]+\))?!?:\s*/i, "") || "reflection memory updates";

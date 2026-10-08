@@ -1,4 +1,5 @@
 import type { ToolSchema } from "@/llm/types";
+import type { SandboxPolicy } from "@/sandbox/policy";
 import type { AgentRecord } from "@/store/agent-store";
 
 /** Everything a tool may touch during one turn. */
@@ -10,6 +11,8 @@ export interface ToolContext {
   memoryDir: string;
   /** Extra environment for shell commands (MEMORY_DIR, AGENT_ID, ...). */
   env: Record<string, string>;
+  /** Kernel confinement for shell commands, when enabled. */
+  sandbox?: SandboxPolicy;
 }
 
 export interface Tool {
