@@ -100,12 +100,12 @@ describe("v0.2 git-backed memory", () => {
     const dir = getMemoryDir(agent.id, home);
     const path = join(dir, "human.md");
     writeFileSync(path, `${readFileSync(path, "utf8")}- uncommitted fact\n`);
-    const before = compileSystemPrompt({ agent, conversationId: "c", memoryDir: dir, previousMessageCount: 0 });
+    const before = compileSystemPrompt({ agent, memoryDir: dir });
     expect(before.content).not.toContain("uncommitted fact");
     git(dir, ["commit", "-qam", "chore: commit fact"]);
-    const after = compileSystemPrompt({ agent, conversationId: "c", memoryDir: dir, previousMessageCount: 0 });
+    const after = compileSystemPrompt({ agent, memoryDir: dir });
     expect(after.content).toContain("- uncommitted fact");
-    expect(after.revision).not.toBe(before.revision);
+    expect(after.memfsRevision).not.toBe(before.memfsRevision);
   });
 
   test("remember → bash edits human.md and commits → next turn knows it", async () => {

@@ -2,6 +2,7 @@
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { runTurn, type TurnEvent } from "@/agent/loop";
+import { invalidateSystemPrompt, readCachedSystemPrompt } from "@/agent/system-prompt";
 import { createProvider } from "@/llm/provider";
 import { compileSystemPrompt } from "@/memory/compile";
 import { git } from "@/memory/git";
@@ -17,6 +18,7 @@ const { positionals, values } = parseArgs({
     agent: { type: "string", short: "a", default: "agent-default" },
     conversation: { type: "string", short: "c", default: "default" },
     prompt: { type: "string", short: "p" },
+    fresh: { type: "boolean", default: false },
   },
 });
 
@@ -27,6 +29,9 @@ function printEvent(event: TurnEvent): void {
   if (event.type === "text") process.stdout.write(event.delta);
   if (event.type === "tool_call") {
     console.log(`\n  ⚙ ${event.name}(${JSON.stringify(event.arguments)})`);
+  }
+  if (event.type === "memory_update") {
+    console.log("\n  ↻ memory changed — injected <memory_update> reminder");
   }
   if (event.type === "tool_result") {
     console.log(`  ${event.ok ? "✓" : "✗"} ${event.content.split("\n")[0]}`);
@@ -54,16 +59,19 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "prompt") {
+    // The prompt this conversation is using; --fresh shows what a recompile would produce.
     const agent = loadOrCreateAgent(values.agent, home);
     const store = new ConversationStore(agent.id, values.conversation, home);
-    console.log(
-      compileSystemPrompt({
-        agent,
-        conversationId: store.conversationId,
-        memoryDir: getMemoryDir(agent.id, home),
-        previousMessageCount: store.all().length,
-      }).content,
-    );
+    const cached = values.fresh ? undefined : readCachedSystemPrompt(store);
+    const prompt = cached ?? compileSystemPrompt({ agent, memoryDir: getMemoryDir(agent.id, home) });
+    console.log(prompt.content);
+    console.error(`[${cached ? "cached" : "fresh"} · compiled ${prompt.compiledAt} · memfs ${prompt.memfsRevision?.slice(0, 7)}]`);
+    return;
+  }
+  if (command === "recompile") {
+    const agent = loadOrCreateAgent(values.agent, home);
+    invalidateSystemPrompt(new ConversationStore(agent.id, values.conversation, home));
+    console.log(`Conversation ${values.conversation} will recompile its system prompt on the next step.`);
     return;
   }
   if (command === "memory") {

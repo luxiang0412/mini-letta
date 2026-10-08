@@ -1,3 +1,4 @@
+import { isReminderOnly, stripReminders } from "@/agent/reminders";
 import {
   type CompletionRequest,
   type CompletionResult,
@@ -13,14 +14,21 @@ import {
  */
 export type MockRule = (request: CompletionRequest) => CompletionResult | null;
 
+/** The last message that needs an answer (reminder-only messages don't). */
 export function lastMessage(request: CompletionRequest): Message | undefined {
-  return request.messages.at(-1);
+  for (let i = request.messages.length - 1; i >= 0; i--) {
+    const message = request.messages[i];
+    if (message && !(message.role === "user" && isReminderOnly(message.content))) return message;
+  }
+  return undefined;
 }
 
+/** What the human last typed, with harness reminders stripped. */
 export function lastUserText(request: CompletionRequest): string {
   for (let i = request.messages.length - 1; i >= 0; i--) {
     const message = request.messages[i];
-    if (message?.role === "user") return message.content.trim();
+    if (message?.role !== "user" || isReminderOnly(message.content)) continue;
+    return stripReminders(message.content);
   }
   return "";
 }
@@ -48,7 +56,24 @@ export function promptSection(system: string, label: string): string | undefined
     .trim();
 }
 
+/**
+ * A memory section as the model should believe it: the newest
+ * <memory_update> wins over the (possibly stale) system prompt.
+ */
+export function currentMemorySection(request: CompletionRequest, label: string): string | undefined {
+  for (let i = request.messages.length - 1; i >= 0; i--) {
+    const content = request.messages[i]?.content ?? "";
+    if (content.includes("<memory_update>")) {
+      const section = promptSection(content, label);
+      if (section !== undefined) return section;
+    }
+  }
+  return promptSection(request.system, label);
+}
+
 const REMEMBER = /^(?:请)?(?:记住|remember)\s*[:：]?\s*(.+)$/is;
+const PERSONA = /^(?:设定|persona)\s*[:：]\s*(.+)$/is;
+const SIGNATURE = /回答末尾(?:总是)?加上\s*(\S+)/;
 const WHO_AM_I = /我是谁|你(?:都)?知道我(?:什么|哪些)|关于我|what do you know about me/i;
 
 /** After a tool ran, summarise its result in one sentence. */
@@ -79,11 +104,27 @@ const rememberRule: MockRule = (request) => {
   });
 };
 
-/** "你知道我什么？" → answer only from what the compiled prompt contains. */
+/** "设定：X" → append X to persona.md and commit it. */
+const personaRule: MockRule = (request) => {
+  if (lastMessage(request)?.role !== "user") return null;
+  const rule = lastUserText(request).match(PERSONA)?.[1]?.trim();
+  if (!rule || !hasTool(request, "bash")) return null;
+  return callTool("bash", {
+    command: [
+      'cd "$MEMORY_DIR"',
+      `printf '%s\\n' ${shellQuote(`- ${rule}`)} >> persona.md`,
+      "git add persona.md",
+      `git commit -q -m ${shellQuote("feat: update persona")} -- persona.md`,
+      "git log --oneline -1",
+    ].join(" && "),
+  });
+};
+
+/** "你知道我什么？" → answer only from what the compiled memory contains. */
 const whoAmIRule: MockRule = (request) => {
   if (lastMessage(request)?.role !== "user") return null;
   if (!WHO_AM_I.test(lastUserText(request))) return null;
-  const human = promptSection(request.system, "human");
+  const human = currentMemorySection(request, "human");
   return say(human ? `我记得关于你的这些：\n${human}` : "我对你还一无所知。");
 };
 
@@ -96,7 +137,7 @@ export class MockProvider implements LLMProvider {
 
   constructor(options: { contextWindow?: number; rules?: MockRule[] } = {}) {
     this.contextWindow = options.contextWindow ?? 8_000;
-    this.rules = [...(options.rules ?? []), afterToolRule, rememberRule, whoAmIRule, echoRule];
+    this.rules = [...(options.rules ?? []), afterToolRule, rememberRule, personaRule, whoAmIRule, echoRule];
   }
 
   async complete(
@@ -104,8 +145,13 @@ export class MockProvider implements LLMProvider {
     onText?: (delta: string) => void,
   ): Promise<CompletionResult> {
     for (const rule of this.rules) {
-      const result = rule(request);
+      let result = rule(request);
       if (!result) continue;
+      // Behaviour follows memory: a persona line can demand a signature.
+      const signature = currentMemorySection(request, "persona")?.match(SIGNATURE)?.[1];
+      if (signature && result.toolCalls.length === 0) {
+        result = { ...result, content: `${result.content} ${signature}` };
+      }
       for (let i = 0; i < result.content.length; i += 8) {
         onText?.(result.content.slice(i, i + 8));
       }

@@ -1,14 +1,22 @@
-import { compileSystemPrompt } from "@/memory/compile";
 import { getMemoryDir } from "@/memory/memfs";
 import { type LLMProvider, type Message, makeMessage } from "@/llm/types";
 import type { AgentRecord } from "@/store/agent-store";
 import type { ConversationStore } from "@/store/conversation-store";
 import { memoryEnv, type Tool, type ToolContext } from "@/tools/types";
+import {
+  checkMemoryAfterTurn,
+  drainReminders,
+  enqueueReminder,
+  formatAgentInfo,
+  wrapReminder,
+} from "./reminders";
+import { resolveSystemPrompt } from "./system-prompt";
 
 export type TurnEvent =
   | { type: "text"; delta: string }
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
-  | { type: "tool_result"; name: string; ok: boolean; content: string };
+  | { type: "tool_result"; name: string; ok: boolean; content: string }
+  | { type: "memory_update"; content: string };
 
 export interface TurnInput {
   agent: AgentRecord;
@@ -47,31 +55,37 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     env: memoryEnv(agent, memoryDir),
   };
 
-  store.append(makeMessage("user", input.userText));
+  // Reminders ride along with the user's message, before what they typed.
+  const reminders = drainReminders(store);
+  if (store.all().length === 0) {
+    reminders.unshift(formatAgentInfo(agent, memoryDir, store.conversationId));
+  }
+  store.append(makeMessage("user", [...reminders.map(wrapReminder), input.userText].join("\n\n")));
 
   let systemPrompt = "";
-  for (let step = 1; step <= maxSteps; step++) {
-    const history = store.all();
-    // v0.2 still recompiles every step, but only from COMMITTED memory.
-    systemPrompt = compileSystemPrompt({
-      agent,
-      conversationId: store.conversationId,
-      memoryDir,
-      previousMessageCount: history.length,
-    }).content;
-    const result = await provider.complete(
-      { system: systemPrompt, messages: history, tools: tools.map((t) => t.schema) },
+  let result: TurnResult | undefined;
+  for (let step = 1; step <= maxSteps && !result; step++) {
+    const resolved = resolveSystemPrompt({ agent, memoryDir, store });
+    systemPrompt = resolved.systemPrompt;
+    if (resolved.memoryUpdate) {
+      // Persisted, so the update stays in context on every later step and turn.
+      store.append(makeMessage("user", wrapReminder(resolved.memoryUpdate)));
+      onEvent?.({ type: "memory_update", content: resolved.memoryUpdate });
+    }
+    const response = await provider.complete(
+      { system: systemPrompt, messages: store.all(), tools: tools.map((t) => t.schema) },
       (delta) => onEvent?.({ type: "text", delta }),
     );
     store.append(
-      makeMessage("assistant", result.content, {
-        ...(result.toolCalls.length ? { toolCalls: result.toolCalls } : {}),
+      makeMessage("assistant", response.content, {
+        ...(response.toolCalls.length ? { toolCalls: response.toolCalls } : {}),
       }),
     );
-    if (result.toolCalls.length === 0) {
-      return { steps: step, finalText: result.content, systemPrompt };
+    if (response.toolCalls.length === 0) {
+      result = { steps: step, finalText: response.content, systemPrompt };
+      break;
     }
-    for (const call of result.toolCalls) {
+    for (const call of response.toolCalls) {
       onEvent?.({ type: "tool_call", name: call.name, arguments: call.arguments });
       const toolMessage = await executeTool(toolsByName.get(call.name), call, ctx);
       store.append(toolMessage);
@@ -83,7 +97,10 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
       });
     }
   }
-  return { steps: maxSteps, finalText: "(stopped: max steps reached)", systemPrompt };
+
+  const dirty = checkMemoryAfterTurn(memoryDir);
+  if (dirty) enqueueReminder(store, dirty);
+  return result ?? { steps: maxSteps, finalText: "(stopped: max steps reached)", systemPrompt };
 }
 
 async function executeTool(
