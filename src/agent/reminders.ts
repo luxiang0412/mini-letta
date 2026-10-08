@@ -1,7 +1,7 @@
 import type { CompiledSystemPrompt } from "@/memory/compile";
 import type { SyncResult } from "@/sync/remote";
-import { auditCommittedMemory } from "@/memory/audit";
-import { git, headRevision } from "@/memory/git";
+import { auditIfHeadChanged } from "@/memory/audit";
+import { git } from "@/memory/git";
 import type { AgentRecord } from "@/store/agent-store";
 import type { ConversationStore } from "@/store/conversation-store";
 
@@ -54,22 +54,21 @@ export function formatAgentInfo(agent: AgentRecord, memoryDir: string, conversat
  * formatMemoryPostTurnSyncReminder: uncommitted memory never reaches the
  * prompt, so tell the agent on its next turn.
  */
-export function checkMemoryAfterTurn(memoryDir: string, revisionBefore?: string): string | null {
-  // A commit made with --no-verify skipped the hook: audit what was committed.
-  const revisionAfter = headRevision(memoryDir);
-  if (revisionAfter && revisionAfter !== revisionBefore) {
-    const problems = auditCommittedMemory(memoryDir);
-    if (problems.length) {
-      return [
-        "MEMORY INVALID: Committed memory does not pass validation (was the hook bypassed?).",
-        "",
-        `Memory directory: ${memoryDir}`,
-        ...problems.map((problem) => `- ${problem}`),
-        "",
-        "Fix the files and commit normally. Never use `git commit --no-verify` on memory.",
-      ].join("\n");
-    }
-  }
+/** HEAD moved to a revision that fails validation (e.g. a --no-verify commit). */
+export function checkCommittedMemory(memoryDir: string): string | null {
+  const problems = auditIfHeadChanged(memoryDir);
+  if (!problems.length) return null;
+  return [
+    "MEMORY INVALID: Committed memory does not pass validation (was the hook bypassed?).",
+    "",
+    `Memory directory: ${memoryDir}`,
+    ...problems.map((problem) => `- ${problem}`),
+    "",
+    "Fix the files and commit normally. Never use `git commit --no-verify` on memory.",
+  ].join("\n");
+}
+
+export function checkMemoryAfterTurn(memoryDir: string): string | null {
   const status = git(memoryDir, ["status", "--porcelain"]).stdout.trim();
   if (!status) return null;
   const changed = status.split("\n").length;

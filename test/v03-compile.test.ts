@@ -129,6 +129,22 @@ describe("v0.3 turns", () => {
     expect(turn).toContain("human.md: missing frontmatter");
   });
 
+  test("a hook-bypassing commit BETWEEN turns is reported at the start of the next turn", async () => {
+    const { home, agent, memoryDir, store } = setup("agent-between");
+    const provider = new MockProvider();
+    await runTurn({ agent, provider, store, tools: FILE_TOOLS, home, userText: "你好" });
+    writeFileSync(join(memoryDir, "persona.md"), "BROKEN persona without frontmatter\n");
+    expect(git(memoryDir, ["commit", "-q", "--no-verify", "-am", "broken"]).ok).toBe(true);
+    await runTurn({ agent, provider, store, tools: FILE_TOOLS, home, userText: "在吗" });
+    const turn = store.all().find((m) => m.role === "user" && m.content.endsWith("在吗"))?.content ?? "";
+    expect(turn).toContain("MEMORY INVALID");
+    expect(turn).toContain("persona.md: missing frontmatter");
+    // Reported once per revision, not on every turn.
+    await runTurn({ agent, provider, store, tools: FILE_TOOLS, home, userText: "还在吗" });
+    const next = store.all().find((m) => m.role === "user" && m.content.endsWith("还在吗"))?.content ?? "";
+    expect(next).not.toContain("MEMORY INVALID");
+  });
+
   test("uncommitted memory → MEMORY COMMIT NEEDED on the next turn", async () => {
     const { home, agent, memoryDir, store } = setup("agent-d");
     // A model that edits memory during the turn but forgets to commit

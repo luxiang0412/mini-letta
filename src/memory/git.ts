@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 export interface GitResult {
   ok: boolean;
@@ -35,4 +36,13 @@ export function gitOrThrow(cwd: string, args: string[], env: NodeJS.ProcessEnv =
 export function headRevision(cwd: string): string | undefined {
   const result = git(cwd, ["rev-parse", "--verify", "HEAD"]);
   return result.ok ? result.stdout.trim() : undefined;
+}
+
+/**
+ * This checkout's own git directory (letta-code's getMemoryGitDir,
+ * src/agent/memory-git-dir.ts). In a worktree `.git` is a FILE pointing to
+ * `<common>/worktrees/<name>`, so never build paths as `<checkout>/.git/...`.
+ */
+export function gitDir(cwd: string): string {
+  return resolve(cwd, gitOrThrow(cwd, ["rev-parse", "--git-dir"]).trim());
 }

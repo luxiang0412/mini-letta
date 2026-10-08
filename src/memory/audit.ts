@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { git } from "./git";
+import { git, gitDir, headRevision } from "./git";
 import { buildValidatorScript } from "./hooks";
 
 /**
@@ -30,4 +30,22 @@ export function auditCommittedMemory(memoryDir: string): string[] {
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+}
+
+const LAST_AUDIT = "mini-letta-last-audit.json";
+
+/**
+ * Audit HEAD once per revision, whoever moved it and whenever: during a turn,
+ * between turns (a human, another process), or via a merge. Returns the
+ * problems found for a newly seen revision, else [].
+ */
+export function auditIfHeadChanged(memoryDir: string): string[] {
+  const revision = headRevision(memoryDir);
+  if (!revision) return [];
+  const record = join(gitDir(memoryDir), LAST_AUDIT);
+  const last = existsSync(record) ? (JSON.parse(readFileSync(record, "utf8")) as { revision?: string }) : {};
+  if (last.revision === revision) return [];
+  const problems = auditCommittedMemory(memoryDir);
+  writeFileSync(record, JSON.stringify({ revision, ok: problems.length === 0 }));
+  return problems;
 }

@@ -2,7 +2,6 @@ import { compactConversation } from "@/context/compact-conversation";
 import type { CompactionStats } from "@/context/compaction";
 import { shouldCompact } from "@/context/compaction";
 import { estimateRequestTokens } from "@/context/tokens";
-import { headRevision } from "@/memory/git";
 import { getMemoryDir } from "@/memory/memfs";
 import { isShellSandboxEnabled, type SandboxPolicy } from "@/sandbox/policy";
 import { pullMemory, syncAfterTurn } from "@/sync/remote";
@@ -18,6 +17,7 @@ import type { AgentRecord } from "@/store/agent-store";
 import type { ConversationStore } from "@/store/conversation-store";
 import { memoryEnv, type Tool, type ToolContext } from "@/tools/types";
 import {
+  checkCommittedMemory,
   checkMemoryAfterTurn,
   drainReminders,
   enqueueReminder,
@@ -76,11 +76,13 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     sandbox: input.sandbox ?? (isShellSandboxEnabled() ? crossAgentProfile(input.home, agent.id) : undefined),
   };
 
-  const revisionAtStart = headRevision(memoryDir);
   // Take what other machines pushed before compiling anything (letta pulls on startup).
   const pulled = pullMemory(memoryDir);
   const pullProblem = formatSyncReminder(pulled, memoryDir);
   if (pullProblem) enqueueReminder(store, pullProblem);
+  // Someone may have committed between turns, bypassing the hook.
+  const invalidAtStart = checkCommittedMemory(memoryDir);
+  if (invalidAtStart) enqueueReminder(store, invalidAtStart);
 
   // Reminders ride along with the user's message, before what they typed.
   const reminders = drainReminders(store);
@@ -147,7 +149,9 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
   }
 
-  const dirty = checkMemoryAfterTurn(memoryDir, revisionAtStart);
+  const invalid = checkCommittedMemory(memoryDir);
+  if (invalid) enqueueReminder(store, invalid);
+  const dirty = checkMemoryAfterTurn(memoryDir);
   if (dirty) enqueueReminder(store, dirty);
   const synced = syncAfterTurn(memoryDir);
   const syncProblem = formatSyncReminder(synced, memoryDir);
