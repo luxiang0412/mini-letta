@@ -2,6 +2,7 @@ import { compactConversation } from "@/context/compact-conversation";
 import type { CompactionStats } from "@/context/compaction";
 import { shouldCompact } from "@/context/compaction";
 import { estimateRequestTokens } from "@/context/tokens";
+import { headRevision } from "@/memory/git";
 import { getMemoryDir } from "@/memory/memfs";
 import { isShellSandboxEnabled, type SandboxPolicy } from "@/sandbox/policy";
 import { pullMemory, syncAfterTurn } from "@/sync/remote";
@@ -75,6 +76,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     sandbox: input.sandbox ?? (isShellSandboxEnabled() ? crossAgentProfile(input.home, agent.id) : undefined),
   };
 
+  const revisionAtStart = headRevision(memoryDir);
   // Take what other machines pushed before compiling anything (letta pulls on startup).
   const pulled = pullMemory(memoryDir);
   const pullProblem = formatSyncReminder(pulled, memoryDir);
@@ -145,7 +147,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     }
   }
 
-  const dirty = checkMemoryAfterTurn(memoryDir);
+  const dirty = checkMemoryAfterTurn(memoryDir, revisionAtStart);
   if (dirty) enqueueReminder(store, dirty);
   const synced = syncAfterTurn(memoryDir);
   const syncProblem = formatSyncReminder(synced, memoryDir);

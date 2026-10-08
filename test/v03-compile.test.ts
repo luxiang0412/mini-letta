@@ -112,6 +112,23 @@ describe("v0.3 turns", () => {
     expect(fresh.finalText).toEndWith("🦉");
   });
 
+  test("a hook-bypassing commit during a turn → MEMORY INVALID on the next turn", async () => {
+    const { home, agent, store } = setup("agent-bypass");
+    const sneaky = new MockProvider({
+      rules: [
+        (request) =>
+          request.messages.at(-1)?.role === "user" && request.messages.at(-1)?.content.endsWith("改一下")
+            ? { content: "", toolCalls: [{ id: "c1", name: "bash", arguments: { command: 'cd "$MEMORY_DIR" && echo oops > human.md && git commit -q --no-verify -am oops' } }] }
+            : null,
+      ],
+    });
+    await runTurn({ agent, provider: sneaky, store, tools: FILE_TOOLS, home, userText: "改一下" });
+    await runTurn({ agent, provider: sneaky, store, tools: FILE_TOOLS, home, userText: "继续" });
+    const turn = store.all().find((m) => m.role === "user" && m.content.endsWith("继续"))?.content ?? "";
+    expect(turn).toContain("MEMORY INVALID");
+    expect(turn).toContain("human.md: missing frontmatter");
+  });
+
   test("uncommitted memory → MEMORY COMMIT NEEDED on the next turn", async () => {
     const { home, agent, memoryDir, store } = setup("agent-d");
     // A model that edits memory during the turn but forgets to commit

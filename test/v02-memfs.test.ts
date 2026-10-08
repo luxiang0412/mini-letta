@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { runTurn } from "@/agent/loop";
 import { MockProvider } from "@/llm/mock";
 import { compileSystemPrompt } from "@/memory/compile";
+import { auditCommittedMemory } from "@/memory/audit";
 import { validateMemoryTree } from "@/memory/constraints";
 import { isCoreMemoryPath, isProjectedMemoryPath } from "@/memory/format";
 import { validateMemoryFile } from "@/memory/frontmatter";
@@ -100,6 +101,18 @@ describe("v0.2 git-backed memory", () => {
     expect(approved.ok).toBe(true);
     const tooBig = commit(dir, "big.md", `---\nname: Big\ndescription: too big\n---\n${"x".repeat(100)}\n`);
     expect(tooBig.stderr).toContain("big.md: 140 characters exceeds 120 from maxFileCharacters");
+  });
+
+  test("a --no-verify commit is caught by the HEAD audit", () => {
+    const home = tempHome();
+    createAgent({ id: "agent-nv" }, home);
+    const dir = getMemoryDir("agent-nv", home);
+    expect(auditCommittedMemory(dir)).toEqual([]);
+    writeFileSync(join(dir, "human.md"), "BYPASSED: no frontmatter\n");
+    expect(git(dir, ["commit", "-q", "--no-verify", "-am", "sneaky"]).ok).toBe(true);
+    expect(auditCommittedMemory(dir)).toEqual(["human.md: missing frontmatter (must start with ---)"]);
+    // The audit used a throwaway index: the real one is untouched.
+    expect(git(dir, ["status", "--porcelain"]).stdout).toBe("");
   });
 
   test("only committed memory reaches the prompt", () => {
