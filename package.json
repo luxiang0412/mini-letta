@@ -1,0 +1,17 @@
+{
+  "name": "mini-letta",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A tiny stateful agent with git-backed memory, rebuilt from letta-code's memory subsystem",
+  "bin": { "mini-letta": "src/cli.ts" },
+  "scripts": {
+    "chat": "bun run src/cli.ts chat",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
