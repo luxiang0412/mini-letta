@@ -82,6 +82,10 @@ export function initMemoryRepo(input: {
   }
   gitOrThrow(memoryDir, ["config", "user.name", author.name]);
   gitOrThrow(memoryDir, ["config", "user.email", author.email]);
+  // Memory bytes must not depend on the host: a global core.autocrlf=true
+  // would check worktrees and merges out with CRLF.
+  gitOrThrow(memoryDir, ["config", "core.autocrlf", "false"]);
+  gitOrThrow(memoryDir, ["config", "core.eol", "lf"]);
   installMemoryHooks(memoryDir);
   if (git(memoryDir, ["rev-parse", "--verify", "HEAD"]).ok) return;
 

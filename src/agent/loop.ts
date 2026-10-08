@@ -38,6 +38,8 @@ export interface TurnInput {
   home: string;
   /** Defaults to the agent's MemFS checkout. */
   memoryDir?: string;
+  /** Extra shell environment (a subagent's TRANSCRIPT_PATH, PARENT_AGENT_ID, ...). */
+  extraEnv?: Record<string, string>;
   maxSteps?: number;
   onEvent?: (event: TurnEvent) => void;
 }
@@ -63,7 +65,7 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
     home: input.home,
     conversationId: store.conversationId,
     memoryDir,
-    env: memoryEnv(agent, memoryDir),
+    env: { ...memoryEnv(agent, memoryDir), ...input.extraEnv },
   };
 
   // Reminders ride along with the user's message, before what they typed.

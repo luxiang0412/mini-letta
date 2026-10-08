@@ -70,6 +70,14 @@ describe("v0.2 git-backed memory", () => {
     );
   });
 
+  test("memory repos pin LF line endings regardless of global git config", () => {
+    const home = tempHome();
+    createAgent({ id: "agent-lf" }, home);
+    const dir = getMemoryDir("agent-lf", home);
+    expect(git(dir, ["config", "--local", "core.autocrlf"]).stdout.trim()).toBe("false");
+    expect(git(dir, ["config", "--local", "core.eol"]).stdout.trim()).toBe("lf");
+  });
+
   test("pre-commit hook rejects invalid memory and accepts valid memory", () => {
     const home = tempHome();
     createAgent({ id: "agent-h" }, home);

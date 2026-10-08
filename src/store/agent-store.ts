@@ -11,12 +11,26 @@ export interface MemoryBlock {
   description?: string;
 }
 
+export type ReflectionTrigger = "off" | "step-count" | "compaction-event";
+
+/** letta-code's /sleeptime settings (src/cli/helpers/memory-reminder.ts). */
+export interface ReflectionSettings {
+  trigger: ReflectionTrigger;
+  stepCount: number;
+}
+
+export const DEFAULT_REFLECTION_SETTINGS: ReflectionSettings = {
+  trigger: "compaction-event",
+  stepCount: 25,
+};
+
 export interface AgentRecord {
   id: string;
   name: string;
   /** Raw system prompt; `{CORE_MEMORY}` marks where memory is compiled in. */
   system: string;
   createdAt: string;
+  reflection?: ReflectionSettings;
 }
 
 export interface CreateAgentInput {
