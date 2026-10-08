@@ -10,7 +10,12 @@ import { getMemoryDir } from "@/memory/memfs";
 import { listAgents, loadOrCreateAgent } from "@/store/agent-store";
 import { ConversationStore } from "@/store/conversation-store";
 import { getHome } from "@/store/paths";
+import { compactConversation } from "@/context/compact-conversation";
+import { searchRecall } from "@/recall/search";
 import { FILE_TOOLS } from "@/tools/file-tools";
+import { recallSearchTool } from "@/tools/recall-tool";
+
+const TOOLS = [...FILE_TOOLS, recallSearchTool];
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -30,6 +35,10 @@ function printEvent(event: TurnEvent): void {
   if (event.type === "tool_call") {
     console.log(`\n  ⚙ ${event.name}(${JSON.stringify(event.arguments)})`);
   }
+  if (event.type === "compaction") {
+    const s = event.stats;
+    console.log(`\n  ⇣ compacted (${s.trigger}): ${s.messagesBefore} → ${s.messagesAfter} messages, ~${s.tokensBefore} → ~${s.tokensAfter} tokens`);
+  }
   if (event.type === "memory_update") {
     console.log("\n  ↻ memory changed — injected <memory_update> reminder");
   }
@@ -45,7 +54,7 @@ async function chatOnce(text: string): Promise<void> {
     agent,
     provider: createProvider(),
     store,
-    tools: FILE_TOOLS,
+    tools: TOOLS,
     userText: text,
     home,
     onEvent: printEvent,
@@ -66,6 +75,23 @@ async function main(): Promise<void> {
     const prompt = cached ?? compileSystemPrompt({ agent, memoryDir: getMemoryDir(agent.id, home) });
     console.log(prompt.content);
     console.error(`[${cached ? "cached" : "fresh"} · compiled ${prompt.compiledAt} · memfs ${prompt.memfsRevision?.slice(0, 7)}]`);
+    return;
+  }
+  if (command === "compact") {
+    const agent = loadOrCreateAgent(values.agent, home);
+    const stats = await compactConversation({
+      store: new ConversationStore(agent.id, values.conversation, home),
+      provider: createProvider(),
+      trigger: "manual",
+    });
+    console.log(JSON.stringify(stats));
+    return;
+  }
+  if (command === "search") {
+    const agent = loadOrCreateAgent(values.agent, home);
+    for (const hit of searchRecall({ home, agentId: agent.id, query: positionals.slice(1).join(" ") })) {
+      console.log(`${hit.score.toFixed(2)}\t${hit.conversationId}\t${hit.role}\t${hit.text.replace(/\s+/g, " ").slice(0, 100)}`);
+    }
     return;
   }
   if (command === "recompile") {

@@ -22,6 +22,8 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Tool messages answer exactly one tool call. */
   toolCallId?: string;
+  /** Harness-made messages: a compaction summary (letta's summary_message). */
+  kind?: "summary";
   createdAt: string;
 }
 
@@ -72,4 +74,12 @@ export function makeMessage(
     createdAt: new Date().toISOString(),
     ...extra,
   };
+}
+
+/** The request did not fit the model's context window. */
+export class ContextOverflowError extends Error {
+  constructor(readonly requestTokens: number, readonly contextWindow: number) {
+    super(`Context overflow: ~${requestTokens} tokens > window ${contextWindow}`);
+    this.name = "ContextOverflowError";
+  }
 }

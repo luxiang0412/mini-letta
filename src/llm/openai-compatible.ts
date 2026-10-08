@@ -1,4 +1,11 @@
-import type { CompletionRequest, CompletionResult, LLMProvider, Message } from "./types";
+import { estimateRequestTokens } from "@/context/tokens";
+import {
+  type CompletionRequest,
+  type CompletionResult,
+  ContextOverflowError,
+  type LLMProvider,
+  type Message,
+} from "./types";
 
 /**
  * Minimal OpenAI-compatible chat client (works with Ollama's /v1 endpoint).
@@ -79,7 +86,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error(`LLM HTTP ${response.status}: ${await response.text()}`);
+      const text = await response.text();
+      if (/context|too long|maximum.*tokens/i.test(text)) {
+        throw new ContextOverflowError(estimateRequestTokens(request), this.contextWindow);
+      }
+      throw new Error(`LLM HTTP ${response.status}: ${text}`);
     }
     const json = (await response.json()) as {
       choices: Array<{ message: { content: string | null; tool_calls?: WireToolCall[] } }>;
