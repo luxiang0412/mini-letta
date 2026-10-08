@@ -40,17 +40,23 @@ export function validateMemoryFile(path: string, content: string): string[] {
   return errors;
 }
 
-/** Split `---` frontmatter (simple `key: value` lines) from the body. */
-export function parseFrontmatter(content: string): {
+/**
+ * Split `---` frontmatter (simple `key: value` lines) from the body. Like
+ * letta-code's parseFrontmatter (src/utils/frontmatter.ts): strip a BOM,
+ * normalize CRLF, and trim the body — a differential run against letta's
+ * compiler showed an extra blank line here before this matched.
+ */
+export function parseFrontmatter(raw: string): {
   frontmatter: Record<string, string>;
   body: string;
 } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const content = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  const match = content.match(/^---\n([\s\S]*?)\n---(?:\n([\s\S]*))?$/);
   if (!match) return { frontmatter: {}, body: content };
   const frontmatter: Record<string, string> = {};
   for (const line of (match[1] ?? "").split("\n")) {
     const separator = line.indexOf(":");
     if (separator > 0) frontmatter[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
   }
-  return { frontmatter, body: match[2] ?? "" };
+  return { frontmatter, body: (match[2] ?? "").trim() };
 }

@@ -62,7 +62,7 @@ MINI_LETTA_PROVIDER=openai OPENAI_BASE_URL=http://localhost:11434/v1 MINI_LETTA_
 ## Verify
 
 ```bash
-bun test                     # 48 tests
+bun test                     # 49 tests
 bun run typecheck
 bun run check:cycles
 bun scripts/e2e.ts           # the whole story across two "machines"

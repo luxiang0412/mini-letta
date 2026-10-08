@@ -7,7 +7,7 @@ import { compileSystemPrompt } from "@/memory/compile";
 import { auditCommittedMemory } from "@/memory/audit";
 import { validateMemoryTree } from "@/memory/constraints";
 import { isCoreMemoryPath, isProjectedMemoryPath } from "@/memory/format";
-import { validateMemoryFile } from "@/memory/frontmatter";
+import { parseFrontmatter, validateMemoryFile } from "@/memory/frontmatter";
 import { git } from "@/memory/git";
 import { getMemoryDir } from "@/memory/memfs";
 import { createAgent } from "@/store/agent-store";
@@ -40,6 +40,13 @@ describe("v0.2 MemFS layout rules", () => {
       "a.md: unknown frontmatter key 'tags' (allowed: name description)",
       "a.md: missing required field 'description'",
     ]);
+  });
+
+  test("parseFrontmatter matches letta-code: BOM, CRLF, trimmed body", () => {
+    expect(parseFrontmatter("\uFEFF---\r\nname: H\r\ndescription: d\r\n---\r\n\r\n- fact\r\n")).toEqual({
+      frontmatter: { name: "H", description: "d" },
+      body: "- fact",
+    });
   });
 
   test("tree constraints: index, depth, budget, read-only", () => {
