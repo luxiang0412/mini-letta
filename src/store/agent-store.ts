@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { newId } from "@/llm/types";
+import { agentAuthor, getMemoryDir, initialMemoryFiles, initMemoryRepo } from "@/memory/memfs";
 import { agentDir, getHome } from "./paths";
 
-/** A labelled, always-in-context piece of memory (MemGPT "core memory"). */
+/** A labelled piece of starter memory; becomes a root core file in MemFS. */
 export interface MemoryBlock {
   label: string;
   value: string;
   description?: string;
-  readOnly?: boolean;
 }
 
 export interface AgentRecord {
@@ -16,7 +16,6 @@ export interface AgentRecord {
   name: string;
   /** Raw system prompt; `{CORE_MEMORY}` marks where memory is compiled in. */
   system: string;
-  blocks: MemoryBlock[];
   createdAt: string;
 }
 
@@ -28,8 +27,14 @@ export interface CreateAgentInput {
 }
 
 export const DEFAULT_SYSTEM_PROMPT = `You are mini-letta, a stateful agent with persistent memory.
-Your memory is compiled into this prompt below. Keep it accurate: when the user
-tells you something durable about themselves or corrects you, update memory.
+
+Your memory is a git repository of Markdown files at $MEMORY_DIR. Root .md files
+are core memory and are compiled into this prompt; root MEMORY.md is the index.
+Every other memory file has exactly \`name\` and \`description\` frontmatter.
+When the user tells you something durable or corrects you, edit the right file,
+then commit only the files you changed:
+  cd "$MEMORY_DIR" && git add <file> && git commit -m "<type>: <what>" -- <file>
+Edits take effect only after they are committed.
 
 {CORE_MEMORY}`;
 
@@ -42,7 +47,7 @@ export const DEFAULT_BLOCKS: MemoryBlock[] = [
   {
     label: "human",
     description: "What I know about the user.",
-    value: "(nothing yet)",
+    value: "",
   },
 ];
 
@@ -58,10 +63,14 @@ export function createAgent(
     id: input.id ?? newId("agent"),
     name: input.name ?? "mini-letta",
     system: input.system ?? DEFAULT_SYSTEM_PROMPT,
-    blocks: structuredClone(input.blocks ?? DEFAULT_BLOCKS),
     createdAt: new Date().toISOString(),
   };
   saveAgent(agent, home);
+  initMemoryRepo({
+    memoryDir: getMemoryDir(agent.id, home),
+    author: agentAuthor(agent.id, agent.name),
+    files: initialMemoryFiles(input.blocks ?? DEFAULT_BLOCKS),
+  });
   return agent;
 }
 

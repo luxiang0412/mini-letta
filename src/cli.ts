@@ -3,11 +3,13 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { runTurn, type TurnEvent } from "@/agent/loop";
 import { createProvider } from "@/llm/provider";
-import { compileBlocksSystemPrompt } from "@/memory/compile";
+import { compileSystemPrompt } from "@/memory/compile";
+import { git } from "@/memory/git";
+import { getMemoryDir } from "@/memory/memfs";
 import { listAgents, loadOrCreateAgent } from "@/store/agent-store";
 import { ConversationStore } from "@/store/conversation-store";
 import { getHome } from "@/store/paths";
-import { memoryAppendTool, memoryReplaceTool } from "@/tools/memory-block-tools";
+import { FILE_TOOLS } from "@/tools/file-tools";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -38,7 +40,7 @@ async function chatOnce(text: string): Promise<void> {
     agent,
     provider: createProvider(),
     store,
-    tools: [memoryAppendTool, memoryReplaceTool],
+    tools: FILE_TOOLS,
     userText: text,
     home,
     onEvent: printEvent,
@@ -55,12 +57,23 @@ async function main(): Promise<void> {
     const agent = loadOrCreateAgent(values.agent, home);
     const store = new ConversationStore(agent.id, values.conversation, home);
     console.log(
-      compileBlocksSystemPrompt({
+      compileSystemPrompt({
         agent,
         conversationId: store.conversationId,
+        memoryDir: getMemoryDir(agent.id, home),
         previousMessageCount: store.all().length,
-      }),
+      }).content,
     );
+    return;
+  }
+  if (command === "memory") {
+    const agent = loadOrCreateAgent(values.agent, home);
+    const memoryDir = getMemoryDir(agent.id, home);
+    const sub = positionals[1] ?? "path";
+    if (sub === "path") console.log(memoryDir);
+    else if (sub === "log") process.stdout.write(git(memoryDir, ["log", "--oneline", "--decorate"]).stdout);
+    else if (sub === "tree") process.stdout.write(git(memoryDir, ["ls-tree", "-r", "--name-only", "HEAD"]).stdout);
+    else throw new Error(`Unknown memory subcommand '${sub}' (path|log|tree)`);
     return;
   }
   if (command !== "chat") throw new Error(`Unknown command '${command}'`);

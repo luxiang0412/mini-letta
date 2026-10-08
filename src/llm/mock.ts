@@ -59,15 +59,24 @@ const afterToolRule: MockRule = (request) => {
   return say("好的，我已经把这件事记进记忆里了。");
 };
 
-/** "记住：X" → write X into the human block (v0.1) or file (v0.2+). */
+export function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`;
+}
+
+/** "记住：X" → append "- X" to human.md and commit just that file. */
 const rememberRule: MockRule = (request) => {
   if (lastMessage(request)?.role !== "user") return null;
   const fact = lastUserText(request).match(REMEMBER)?.[1]?.trim();
-  if (!fact) return null;
-  if (hasTool(request, "memory_append")) {
-    return callTool("memory_append", { label: "human", content: `- ${fact}` });
-  }
-  return null;
+  if (!fact || !hasTool(request, "bash")) return null;
+  return callTool("bash", {
+    command: [
+      'cd "$MEMORY_DIR"',
+      `printf '%s\\n' ${shellQuote(`- ${fact}`)} >> human.md`,
+      "git add human.md",
+      `git commit -q -m ${shellQuote("chore: remember user fact")} -- human.md`,
+      "git log --oneline -1",
+    ].join(" && "),
+  });
 };
 
 /** "你知道我什么？" → answer only from what the compiled prompt contains. */
@@ -75,7 +84,7 @@ const whoAmIRule: MockRule = (request) => {
   if (lastMessage(request)?.role !== "user") return null;
   if (!WHO_AM_I.test(lastUserText(request))) return null;
   const human = promptSection(request.system, "human");
-  return say(human && human !== "(nothing yet)" ? `我记得关于你的这些：\n${human}` : "我对你还一无所知。");
+  return say(human ? `我记得关于你的这些：\n${human}` : "我对你还一无所知。");
 };
 
 const echoRule: MockRule = (request) => say(`（mock）我听到了：${lastUserText(request)}`);

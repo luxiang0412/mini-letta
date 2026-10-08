@@ -1,28 +1,66 @@
-import type { AgentRecord, MemoryBlock } from "@/store/agent-store";
+import type { AgentRecord } from "@/store/agent-store";
+import { isCoreMemoryPath, labelFromPath } from "./format";
+import { parseFrontmatter } from "./frontmatter";
+import { git, headRevision } from "./git";
 
 /**
- * Compile an agent's memory into its system prompt.
+ * Compile an agent's memory into its system prompt, after letta-code's
+ * compileLocalSystemPrompt (src/backend/local/system-prompt-compilation.ts).
  *
- * Mirrors the shape of letta-code's compileLocalSystemPrompt
- * (src/backend/local/system-prompt-compilation.ts): memory is rendered into
- * XML-ish sections and substituted for the `{CORE_MEMORY}` variable, followed
- * by a `<memory_metadata>` footer.
+ * Only COMMITTED memory counts: files are read from `HEAD` with `git show`,
+ * so a half-finished edit in the working tree never leaks into the prompt.
  */
 export const CORE_MEMORY_VARIABLE = "{CORE_MEMORY}";
 
-export function renderBlock(block: MemoryBlock): string {
-  const lines = [`<${block.label}>`];
-  if (block.description?.trim()) {
-    lines.push(`<description>${block.description.trim()}</description>`);
+export interface CommittedMemoryFile {
+  relativePath: string;
+  label: string;
+  description: string;
+  body: string;
+}
+
+export function readCommittedCoreMemory(memoryDir: string): {
+  files: CommittedMemoryFile[];
+  revision?: string;
+} {
+  const revision = headRevision(memoryDir);
+  if (!revision) return { files: [] };
+  const paths = git(memoryDir, ["ls-tree", "-r", "--name-only", "HEAD"])
+    .stdout.split("\n")
+    .filter((path) => path && isCoreMemoryPath(path));
+  const files = paths.map((relativePath) => {
+    const raw = git(memoryDir, ["show", `HEAD:${relativePath}`]).stdout;
+    const { frontmatter, body } = parseFrontmatter(raw);
+    return {
+      relativePath,
+      label: labelFromPath(relativePath),
+      description: frontmatter.description ?? "",
+      body,
+    };
+  });
+  files.sort((a, b) => a.label.localeCompare(b.label));
+  return { files, revision };
+}
+
+/** Root core files become `<label>` sections; MEMORY.md becomes `<memory>`. */
+export function renderCoreMemory(files: CommittedMemoryFile[]): string {
+  const sections: string[] = [];
+  for (const file of files.filter((f) => f.relativePath !== "MEMORY.md")) {
+    const lines = [`<${file.label}>`];
+    if (file.description.trim()) lines.push(`<description>${file.description.trim()}</description>`);
+    if (file.body.trimEnd()) lines.push(file.body.trimEnd());
+    lines.push(`</${file.label}>`);
+    sections.push(lines.join("\n"));
   }
-  if (block.value.trimEnd()) lines.push(block.value.trimEnd());
-  lines.push(`</${block.label}>`);
-  return lines.join("\n");
+  const index = files.find((f) => f.relativePath === "MEMORY.md");
+  if (index) sections.push(["<memory>", index.body.trimEnd(), "</memory>"].join("\n"));
+  return sections.join("\n\n");
 }
 
 export function renderMemoryMetadata(input: {
   agentId: string;
   conversationId: string;
+  memoryDir: string;
   compiledAt: Date;
   previousMessageCount: number;
 }): string {
@@ -30,6 +68,7 @@ export function renderMemoryMetadata(input: {
     "<memory_metadata>",
     `- AGENT_ID: ${input.agentId}`,
     `- CONVERSATION_ID: ${input.conversationId}`,
+    `- MEMORY_DIR: ${input.memoryDir}`,
     `- System prompt last recompiled: ${input.compiledAt.toISOString()}`,
     `- ${input.previousMessageCount} previous messages are stored in recall memory`,
     "</memory_metadata>",
@@ -44,18 +83,21 @@ export function injectCoreMemory(rawSystemPrompt: string, coreMemory: string): s
   return prompt.replaceAll(CORE_MEMORY_VARIABLE, coreMemory);
 }
 
-export function compileBlocksSystemPrompt(input: {
+export function compileSystemPrompt(input: {
   agent: AgentRecord;
   conversationId: string;
+  memoryDir: string;
   previousMessageCount: number;
   now?: Date;
-}): string {
-  const blocks = input.agent.blocks.map(renderBlock).join("\n\n");
+}): { content: string; revision?: string } {
+  const { files, revision } = readCommittedCoreMemory(input.memoryDir);
   const metadata = renderMemoryMetadata({
     agentId: input.agent.id,
     conversationId: input.conversationId,
+    memoryDir: input.memoryDir,
     compiledAt: input.now ?? new Date(),
     previousMessageCount: input.previousMessageCount,
   });
-  return injectCoreMemory(input.agent.system, `<memory>\n${blocks}\n</memory>\n\n${metadata}`);
+  const coreMemory = [renderCoreMemory(files), metadata].filter((p) => p.trim()).join("\n\n");
+  return { content: injectCoreMemory(input.agent.system, coreMemory), revision };
 }

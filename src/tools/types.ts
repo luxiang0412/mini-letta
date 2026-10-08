@@ -6,6 +6,10 @@ export interface ToolContext {
   agent: AgentRecord;
   home: string;
   conversationId: string;
+  /** The checkout this run may write: the agent's MemFS, or a worktree of it. */
+  memoryDir: string;
+  /** Extra environment for shell commands (MEMORY_DIR, AGENT_ID, ...). */
+  env: Record<string, string>;
 }
 
 export interface Tool {
@@ -19,4 +23,13 @@ export function stringArg(args: Record<string, unknown>, key: string): string {
     throw new Error(`Missing string argument '${key}'`);
   }
   return value;
+}
+
+/** Environment every shell command sees, like letta-code's MEMORY_DIR/AGENT_ID. */
+export function memoryEnv(agent: AgentRecord, memoryDir: string): Record<string, string> {
+  return {
+    MEMORY_DIR: memoryDir,
+    AGENT_ID: agent.id,
+    AGENT_NAME: agent.name,
+  };
 }

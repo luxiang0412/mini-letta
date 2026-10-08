@@ -1,8 +1,9 @@
-import { compileBlocksSystemPrompt } from "@/memory/compile";
+import { compileSystemPrompt } from "@/memory/compile";
+import { getMemoryDir } from "@/memory/memfs";
 import { type LLMProvider, type Message, makeMessage } from "@/llm/types";
 import type { AgentRecord } from "@/store/agent-store";
 import type { ConversationStore } from "@/store/conversation-store";
-import type { Tool, ToolContext } from "@/tools/types";
+import { memoryEnv, type Tool, type ToolContext } from "@/tools/types";
 
 export type TurnEvent =
   | { type: "text"; delta: string }
@@ -16,6 +17,8 @@ export interface TurnInput {
   tools: Tool[];
   userText: string;
   home: string;
+  /** Defaults to the agent's MemFS checkout. */
+  memoryDir?: string;
   maxSteps?: number;
   onEvent?: (event: TurnEvent) => void;
 }
@@ -35,19 +38,27 @@ export async function runTurn(input: TurnInput): Promise<TurnResult> {
   const { agent, provider, store, tools, onEvent } = input;
   const maxSteps = input.maxSteps ?? 8;
   const toolsByName = new Map(tools.map((t) => [t.schema.name, t]));
-  const ctx: ToolContext = { agent, home: input.home, conversationId: store.conversationId };
+  const memoryDir = input.memoryDir ?? getMemoryDir(agent.id, input.home);
+  const ctx: ToolContext = {
+    agent,
+    home: input.home,
+    conversationId: store.conversationId,
+    memoryDir,
+    env: memoryEnv(agent, memoryDir),
+  };
 
   store.append(makeMessage("user", input.userText));
 
   let systemPrompt = "";
   for (let step = 1; step <= maxSteps; step++) {
     const history = store.all();
-    // v0.1 recompiles every step, so a block edit is visible on the next step.
-    systemPrompt = compileBlocksSystemPrompt({
+    // v0.2 still recompiles every step, but only from COMMITTED memory.
+    systemPrompt = compileSystemPrompt({
       agent,
       conversationId: store.conversationId,
+      memoryDir,
       previousMessageCount: history.length,
-    });
+    }).content;
     const result = await provider.complete(
       { system: systemPrompt, messages: history, tools: tools.map((t) => t.schema) },
       (delta) => onEvent?.({ type: "text", delta }),
